@@ -1,27 +1,66 @@
-ENTRY(entry_point)
+ENTRY(entry)
+OUTPUT_FORMAT(elf64-x86-64) 
 
-SECTIONS {
-    kernel_phys_offset = 0xffffffff80000000;
-    . = kernel_phys_offset + 0x100000;
+/* We want to be placed in the higher half, 2MiB above 0x00 in physical memory */
+KERNEL_OFFSET = 0xFFFFFFFF80200000;
 
-    .stivale2hdr ALIGN(4K) : {
+SECTIONS 
+{
+    . = KERNEL_OFFSET;
+
+    __kernel_start = .;
+
+    .stivale2hdr : ALIGN(4K) {
         KEEP(*(.stivale2hdr))
     }
-    
-    .text ALIGN(4K) : {
-        KEEP(*(.text*))
+
+    /* Then place all of the other traditional executable sections afterwards... */
+    . = ALIGN(4K);
+    .text : {
+        __text_start = .;
+        *(.text .text.*)
+        . = ALIGN(4096);
+        __text_end = .;
     }
 
-    .rodata ALIGN(4K) : {
-        KEEP(*(.rodata*))
+    . = ALIGN(4K);
+    .rodata : {
+        __rodata_start = .;
+        *(.rodata*)
+        . = ALIGN(4096);
+        __rodata_end = .;
     }
 
-    .data ALIGN(4K) : {
-        KEEP(*(.data*))
+    . = ALIGN(4K);
+    .data : {
+        __data_start = .;
+        *(.data .data.*)
+        . = ALIGN(4096);
+        __data_end = .;
     }
 
-    .bss ALIGN(4K) : {
-        KEEP(*(COMMON))
-        KEEP(*(.bss*))
+    . = ALIGN(4K);
+    .bss : {
+        __bss_start = .;
+        *(.bss .bss.*)
+        . = ALIGN(4096);
+        __bss_end = .;
     }
+    __kernel_end = .;
+
+    /* Reserve space for stack canary between beginning of stack and end of kernel */
+    . += 4096;
+
+    . = ALIGN(4K);
+    __stack_begin = .;
+    . += 16 * 4096;
+    __stack_end = .;
+
+    /* Reserve space for stack canary between end of stack and beginning of heap */
+    . += 4096;
+
+    . = ALIGN(4K);
+    __heap_begin = .;
+
+    __linker_echo = 0xEEEEEEEE;
 }
