@@ -4,4 +4,6 @@ qemu-system-x86_64 \
     -device ahci,id=ahci \
     -device ide-hd,drive=disk,bus=ahci.0 -m 256M \
     -serial stdio \
+    -no-reboot \
+    -no-shutdown \
     "$@"
