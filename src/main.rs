@@ -9,6 +9,7 @@ use stivale_boot::v2::*;
 
 mod constants;
 mod pager;
+mod asm_wrappers;
 
 const COM1: u16 = 0x03F8;
 
@@ -50,7 +51,7 @@ static STIVALE_HDR: StivaleHeader = StivaleHeader::new()
 fn printstr_serial(s: &str) {
     for &c in s.as_bytes().iter() {
         unsafe {
-            asm!("out dx, al", in("dx") COM1, in("al") c);
+            asm_wrappers::outb(COM1, c);
         }
     }
 }
@@ -83,7 +84,7 @@ extern "C" fn entry(boot_info: &'static StivaleStruct) -> ! {
             printstr("Stack size is valid.\n");
         }
 
-        let _p: pager::Pager;
+        //let _p: pager::Pager;
     }
     loop {}
 }
