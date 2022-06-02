@@ -1,5 +1,4 @@
 use core::mem::size_of;
-use core::num;
 
 use crate::constants::*;
 use crate::asm_wrappers::lcr3;
