@@ -29,3 +29,7 @@ pub unsafe extern "C" fn outw(port: u16, data: u16) {
 pub unsafe extern "C" fn outd(port: u16, data: u32) {
     asm!("out dx, eax", in("dx") port, in("eax") data);
 }
+
+pub unsafe extern "C" fn lcr3(pml4t_phys_addr: usize) {
+    asm!("mov cr3, {p}", p = in(reg) pml4t_phys_addr);
+}
