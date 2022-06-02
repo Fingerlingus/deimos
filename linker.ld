@@ -4,8 +4,7 @@ OUTPUT_FORMAT(elf64-x86-64)
 /* We want to be placed in the higher half, 2MiB above 0x00 in physical memory */
 KERNEL_OFFSET = 0xFFFFFFFF80200000;
 
-SECTIONS 
-{
+SECTIONS {
     . = KERNEL_OFFSET;
 
     __kernel_start = .;
