@@ -2,9 +2,11 @@
 #![no_main]
 #![feature(linkage)]
 #![feature(exclusive_range_pattern)]
+#![feature(const_option)]
 
 use core::panic::PanicInfo;
-use core::arch::asm;
+use constants::PAGE_SIZE;
+use pager::Pager;
 use stivale_boot::v2::*;
 
 mod constants;
@@ -15,6 +17,7 @@ const COM1: u16 = 0x03F8;
 
 static INIT_STACK: [u8; 4096] = [0; 4096];
 static mut TERM_TAG: Option<&StivaleTerminalTag> = None;
+static mut PAGE_TABLE: Pager = Pager::new();
 
 extern "C" {
     #[linkage = "external"] static __stack_begin: *const ();
@@ -46,12 +49,16 @@ static STIVALE_TERMINAL_TAG: StivaleTerminalHeaderTag = StivaleTerminalHeaderTag
 #[used]
 static STIVALE_HDR: StivaleHeader = StivaleHeader::new()
     .stack(&INIT_STACK[4095] as *const u8)
-    .tags((&STIVALE_TERMINAL_TAG as *const StivaleTerminalHeaderTag).cast());    
+    .tags((&STIVALE_TERMINAL_TAG as *const StivaleTerminalHeaderTag).cast());  
+    
+unsafe fn write_COM1(c: u8) {
+    asm_wrappers::outb(COM1, c);
+}
 
 fn printstr_serial(s: &str) {
     for &c in s.as_bytes().iter() {
         unsafe {
-            asm_wrappers::outb(COM1, c);
+            write_COM1(c);
         }
     }
 }
@@ -70,8 +77,17 @@ fn printstr(s: &str) {
     printstr_serial(s);
 }
 
+fn done() -> ! {
+    loop{}
+}
+
 #[no_mangle]
-extern "C" fn entry(boot_info: &'static StivaleStruct) -> ! {
+extern "C" fn entry(boot_info: &'static StivaleStruct) {
+    init(boot_info);
+    done()
+}
+
+fn init(boot_info: &'static StivaleStruct) {
     unsafe { 
         TERM_TAG = match boot_info.terminal() {
             Some(t) => Some(t),
@@ -84,18 +100,17 @@ extern "C" fn entry(boot_info: &'static StivaleStruct) -> ! {
             printstr("Stack size is valid.\n");
         }
 
-        //let _p: pager::Pager;
+        //PAGE_TABLE.init();
     }
-    loop {}
 }
 
 fn panic(s: &str) {
     printstr(s);
-    loop {}
+    done()
 }
 
 #[panic_handler]
 fn panic_handler(_info: &PanicInfo) -> ! {
     printstr("Panicking!");
-    loop {}
+    done()
 }
