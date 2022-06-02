@@ -51,7 +51,7 @@ SECTIONS {
     . += 4096;
 
     . = ALIGN(4K);
-    __stack_begin = .;
+    __stack_start = .;
     . += 16 * 4096;
     __stack_end = .;
 
