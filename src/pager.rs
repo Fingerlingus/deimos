@@ -1,6 +1,7 @@
 use core::mem::size_of;
 
 use crate::constants::*;
+use crate::asm_wrappers::lcr3;
 
 const NUM_PML4TES: usize = match VMEM_MAX / (512 * 1024 * 1024 * 1024) {
     0 => 1,
@@ -45,7 +46,7 @@ fn memset<T>(t: &mut T, c: u8) {
 }
 
 impl Pager {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Pager {
             ptes: [[[[0; 512]; NUM_PDTES  ]; NUM_PDPTES ]; NUM_PML4TES],
             pdtes: [[[0; 512]; NUM_PDPTES ]; NUM_PML4TES],
@@ -61,12 +62,6 @@ impl Pager {
     }
 
     pub fn init(&mut self) {
-        //memset(self.ptes, 0);
-        //memset(self.pdtes, 0);
-        //memset(self.pdptes, 0);
-        //memset(self.pml4tes, 0);
-        //memset(self.phys_addr_map, 0);
-
         self.pml4tes[0]   = (&self.pdptes[0][0]   as *const u64 as u64 & !0xFFF) | 0x03;
         self.pdptes[0][0] = (&self.pdtes[0][0][0] as *const u64 as u64 & !0xFFF) | 0x03;
 
@@ -123,27 +118,27 @@ impl Pager {
         self.phys_addr_map[index] & (1 << offset) != 0x00000000
     }
 
-    pub fn last_mapped_phys_addr(&self) -> Option<*const ()> {
+    pub const fn last_mapped_phys_addr(&self) -> Option<*const ()> {
         self.last_mapped_phys_addr
     }
 
-    pub fn last_mapped_virt_addr(&self) -> Option<*const ()> {
+    pub const fn last_mapped_virt_addr(&self) -> Option<*const ()> {
         self.last_mapped_phys_addr
     }
 
-    pub fn allocated_pages(&self) -> &[Option<*const ()>; MAX_PAGES] {
+    pub const fn allocated_pages(&self) -> &[Option<*const ()>; MAX_PAGES] {
         &self.allocated_pages
     }
 
-    pub fn pml4t(&self) -> &[u64; 512] {
+    pub const fn pml4t(&self) -> &[u64; 512] {
         &self.pml4tes
     }
 
-    pub fn activate(&self) {
-
+    pub unsafe fn activate(&self) {
+        lcr3(&self.pml4tes as *const u64 as usize);
     }
 
-    pub fn map_virt_addr_to_phys_addr(&mut self, vaddr: Option<*const ()>, paddr: Option<*const ()>) -> u8 {
+    pub unsafe fn map_virt_addr_to_phys_addr(&mut self, vaddr: Option<*const ()>, paddr: Option<*const ()>) -> u8 {
         if vaddr.is_none() {
             return 1
         }
@@ -195,7 +190,7 @@ impl Pager {
         return 0
     }
 
-    fn allocate_page(&mut self, ptr: Option<*const ()>) -> Option<*const ()> {
+    pub unsafe fn allocate_page(&mut self, ptr: Option<*const ()>) -> Option<*const ()> {
         let vaddr: *const () = match ptr {
             None => match self.find_free_virt_addr() {
                 None => return None,
@@ -229,7 +224,7 @@ impl Pager {
         }
     }
 
-    fn allocate_pages(&mut self, ptr: Option<*const ()>, num_pages: usize) -> Option<*const ()> {
+    pub unsafe fn allocate_pages(&mut self, ptr: Option<*const ()>, num_pages: usize) -> Option<*const ()> {
         match num_pages {
             0 => return None,
             1 => return match self.is_virtually_allocated(ptr) {
@@ -274,7 +269,7 @@ impl Pager {
         }
     }
 
-    fn unmap_phys_addr(&mut self, ptr: Option<*const ()>) -> u8 {
+    unsafe fn unmap_phys_addr(&mut self, ptr: Option<*const ()>) -> u8 {
         if ptr.is_none() {
             return 1
         }
@@ -295,7 +290,7 @@ impl Pager {
         return 0
     }
 
-    fn unmap_virt_addr(&mut self, ptr: Option<*const ()>) -> u8 {
+    unsafe fn unmap_virt_addr(&mut self, ptr: Option<*const ()>) -> u8 {
         if ptr.is_none() {
             return 1
         }
@@ -317,7 +312,7 @@ impl Pager {
         return 0
     }
 
-    fn deallocate_page(&mut self, ptr: Option<*const ()>) -> u8 {
+    pub unsafe fn deallocate_page(&mut self, ptr: Option<*const ()>) -> u8 {
         if ptr.is_none() {
             return 1
         }
@@ -343,7 +338,7 @@ impl Pager {
         return 0
     }
 
-    fn deallocate_pages(&mut self, ptr: Option<*const ()>, num_pages: usize) -> u8 {
+    pub unsafe fn deallocate_pages(&mut self, ptr: Option<*const ()>, num_pages: usize) -> u8 {
         if ptr.is_none() {
             return 1
         }
@@ -364,7 +359,7 @@ impl Pager {
         };
     }
 
-    fn find_free_virt_addr(&self) -> Option<*const ()> {
+    pub fn find_free_virt_addr(&self) -> Option<*const ()> {
         let mut addr: usize = match self.last_mapped_virt_addr.is_none() {
             true => 16 * 1024 * 1024,
             false => self.last_mapped_virt_addr.unwrap() as usize
@@ -388,7 +383,7 @@ impl Pager {
         Some(addr as *const ())
     }
 
-    fn find_free_phys_addr(&self) -> Option<*const ()> {
+    pub fn find_free_phys_addr(&self) -> Option<*const ()> {
         let mut addr: usize = match self.last_mapped_virt_addr.is_none() {
             true => 16 * 1024 * 1024,
             false => self.last_mapped_phys_addr.unwrap() as usize
