@@ -9,8 +9,8 @@ SECTIONS {
 
     __kernel_start = .;
 
-    .stivale2hdr : ALIGN(4K) {
-        KEEP(*(.stivale2hdr))
+    .limine_reqs : ALIGN(4K) {
+        KEEP(*(.limine_reqs))
     }
 
     /* Then place all of the other traditional executable sections afterwards... */

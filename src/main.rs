@@ -3,18 +3,20 @@
 #![feature(linkage)]
 #![feature(exclusive_range_pattern)]
 #![feature(const_option)]
+#![feature(const_mut_refs)]
 
-use core::panic::PanicInfo;
+use core::{panic::PanicInfo, sync::atomic::{AtomicPtr}};
+
+use limine::*;
+
 use constants::PAGE_SIZE;
 use pager::Pager;
-use stivale_boot::v2::*;
 
 mod constants;
 mod pager;
 mod asm_wrappers;
 
 const COM1: u16 = 0x03F8;
-
 
 static INIT_STACK: [u8; 4096] = [0; 4096];
 
@@ -26,22 +28,33 @@ extern "C" {
 }
 
 static mut KERNEL_SIZE: Option<usize> = None;
-static mut KERNEL_BEGIN_VIRT: Option<usize> = None;
-static mut KERNEL_BEGIN_PHYS: Option<usize> = None;
-static mut TERM_TAG: Option<&StivaleTerminalTag> = None;
+static mut KERNEL_BEGIN_VIRT: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
+static mut KERNEL_BEGIN_PHYS: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 static mut PAGE_TABLE: Pager = Pager::new();
+static mut LIMINE_TERMINAL_RESPONSE: Option<&LimineTerminalResponse> = None;
 
-static STIVALE_FRAMEBUFFER_TAG: StivaleFramebufferHeaderTag = StivaleFramebufferHeaderTag::new();
+static mut LIMINE_TERMINAL_REQUEST:         LimineTerminalRequest       = LimineTerminalRequest::new(0);
+static mut LIMINE_RSDP_REQUEST:             LimineRsdpRequest           = LimineRsdpRequest::new(0);
+static mut LIMINE_SMBIOS_REQUEST:           LimineSmbiosRequest         = LimineSmbiosRequest::new(0);
+static mut LIMINE_EFI_SYSTEM_TABLE_REQUEST: LimineEfiSystemTableRequest = LimineEfiSystemTableRequest::new(0);
+static mut LIMINE_BOOT_TIME_REQUEST:        LimineBootTimeRequest       = LimineBootTimeRequest::new(0);
+static mut LIMINE_KERNEL_ADDRESS_REQUEST:   LimineKernelAddressRequest  = LimineKernelAddressRequest::new(0);
+static mut LIMINE_STACK_SIZE_REQUEST:       LimineStackSizeRequest      = LimineStackSizeRequest::new(0).stack_size(16 * 1024 * 1024);
 
-static STIVALE_TERMINAL_TAG: StivaleTerminalHeaderTag = StivaleTerminalHeaderTag::new()
-    .next((&STIVALE_FRAMEBUFFER_TAG as *const StivaleFramebufferHeaderTag).cast());
-
-#[link_section = ".stivale2hdr"]
+#[link_section = ".limine_reqs"]
 #[no_mangle]
 #[used]
-static STIVALE_HDR: StivaleHeader = StivaleHeader::new()
-    .stack(&INIT_STACK[4095] as *const u8)
-    .tags((&STIVALE_TERMINAL_TAG as *const StivaleTerminalHeaderTag).cast());  
+static LIMINE_REQUESTS_ARRAY: [AtomicPtr<()>; 8] = [
+    unsafe { AtomicPtr::new(&mut LIMINE_TERMINAL_REQUEST         as *mut LimineTerminalRequest       as *mut ()) },
+    unsafe { AtomicPtr::new(&mut LIMINE_RSDP_REQUEST             as *mut LimineRsdpRequest           as *mut ()) },
+    unsafe { AtomicPtr::new(&mut LIMINE_SMBIOS_REQUEST           as *mut LimineSmbiosRequest         as *mut ()) },
+    unsafe { AtomicPtr::new(&mut LIMINE_EFI_SYSTEM_TABLE_REQUEST as *mut LimineEfiSystemTableRequest as *mut ()) },
+    unsafe { AtomicPtr::new(&mut LIMINE_BOOT_TIME_REQUEST        as *mut LimineBootTimeRequest       as *mut ()) },
+    unsafe { AtomicPtr::new(&mut LIMINE_KERNEL_ADDRESS_REQUEST   as *mut LimineKernelAddressRequest  as *mut ()) },
+    unsafe { AtomicPtr::new(&mut LIMINE_STACK_SIZE_REQUEST       as *mut LimineStackSizeRequest      as *mut ()) },
+             AtomicPtr::new(core::ptr::null_mut()                                                    as *mut ())    
+                
+];
     
 unsafe fn write_com1(c: u8) {
     asm_wrappers::outb(COM1, c);
@@ -57,9 +70,23 @@ fn printstr_serial(s: &str) {
 
 fn printstr_terminal(s: &str) {
     unsafe {
-        match TERM_TAG {
-            Some(t) => t.term_write()(s),
-            None => { }
+        match LIMINE_TERMINAL_RESPONSE {
+            None => { },
+            Some(r) => match r.terminal_count {
+                0 => { },
+                _ => {
+                    match r.write() {
+                        None => {  },
+                        Some(w) => match r.terminals() {
+                            None => {  },
+                            Some(a) => match a.first() {
+                                None => {  },
+                                Some(t) => w(t, s)
+                            }
+                        }
+                    }
+                }
+            }
         };
     }
 }
@@ -69,44 +96,70 @@ fn printstr(s: &str) {
     printstr_serial(s);
 }
 
+fn log(s: &str) {
+    printstr(s);
+    printstr("\n");
+}
+
 fn done() -> ! {
     loop{}
 }
 
 #[no_mangle]
-extern "C" fn entry(boot_info: &'static StivaleStruct) {
-    init(boot_info);
+extern "C" fn entry() {
+    init();
     done()
 }
 
-fn init(boot_info: &'static StivaleStruct) {
+fn init() {
     unsafe { 
-        TERM_TAG = match boot_info.terminal() {
-            Some(t) => Some(t),
-            None => None
+        LIMINE_TERMINAL_RESPONSE = match LIMINE_TERMINAL_REQUEST.get_response().get() {
+            Some(p) => Some(p),
+            None => panic("Failed to acquire limine terminal request response."),
         };
 
         if __stack_end as usize - __stack_start as usize <= 4096 {
             panic("Stack is too small!");
         } else {
-            printstr("Stack size is valid.\n");
+            log("Stack size is valid.");
         }
 
         PAGE_TABLE.init();
-        printstr("Page table successfully initialized.\n");
-        KERNEL_BEGIN_VIRT = Some(boot_info.kernel_base_addr().unwrap().virtual_base_address as usize);
-        KERNEL_BEGIN_PHYS = Some(boot_info.kernel_base_addr().unwrap().physical_base_address as usize);
-        KERNEL_SIZE       = Some(__kernel_end as usize - __kernel_start as usize);
-        let num_pages: usize = KERNEL_SIZE.unwrap() / constants::PAGE_SIZE;
-        PAGE_TABLE.allocate_physically_contiguous_pages(Some(KERNEL_BEGIN_PHYS.unwrap() as *const()), 
-                                                        Some(KERNEL_BEGIN_VIRT.unwrap() as *const()), 
+        log("Page table successfully initialized.");
+
+        KERNEL_BEGIN_VIRT = match LIMINE_KERNEL_ADDRESS_REQUEST.get_response().get() {
+            None => panic("Failed to acquire limine kernel base address response."),
+            Some(r) => match r.virtual_base {
+                0 => panic("Limine kernel base address response virtual address is null."),
+                _ => AtomicPtr::<()>::new(r.virtual_base as *mut ())
+            }
+        };
+        log("Acquired kernel base virtual address.");
+
+        KERNEL_BEGIN_PHYS = match LIMINE_KERNEL_ADDRESS_REQUEST.get_response().get() {
+            None => panic("Failed to acquire limine kernel base address response."),
+            Some(r) => match r.physical_base {
+                0 => panic("Limine kernel base address response physical address is null."),
+                _ => AtomicPtr::<()>::new(r.physical_base as *mut ())
+            }
+        };
+        log("Acquired kernel base physical address.");
+
+        KERNEL_SIZE          = Some(__kernel_end as usize - __kernel_start as usize);
+        let num_pages: usize = KERNEL_SIZE.unwrap() / constants::PAGE_SIZE; 
+        PAGE_TABLE.allocate_physically_contiguous_pages(Some(*KERNEL_BEGIN_PHYS.get_mut()), 
+                                                        Some(*KERNEL_BEGIN_VIRT.get_mut()), 
                                                         num_pages);
+        log("Kernel successfully mapped to new page table.");
         PAGE_TABLE.activate();
+        log("New page table successfully loaded.");
     }
 }
 
-fn panic(s: &str) {
+fn panic(s: &str) -> ! {
+    printstr("PANIC: ");
     printstr(s);
+    printstr("\n");
     done()
 }
 
