@@ -23,7 +23,14 @@ const NUM_PDTES: usize = match VMEM_MAX / (2 * 1024 * 1024) {
 
 const NUM_PHYS_ADDR_MAP_ENTRIES: usize = MAX_PAGES / 64;
 
+#[repr(align(4096), C)]
+struct aligned_array<T, const N: usize> {
+    pub arr: [T; N]
+}
+
+#[repr(align(4096), C)]
 pub struct Pager {
+    //ptes: aligned_array<aligned_array<aligned_array<aligned_array<u64, 512>, NUM_PDTES>, NUM_PDPTES, NUM_PML4TES>,
     ptes: [[[[u64; 512]; NUM_PDTES  ]; NUM_PDPTES ]; NUM_PML4TES],
     pdtes: [[[u64; 512]; NUM_PDPTES ]; NUM_PML4TES],
     pdptes: [[u64; 512]; NUM_PML4TES],
